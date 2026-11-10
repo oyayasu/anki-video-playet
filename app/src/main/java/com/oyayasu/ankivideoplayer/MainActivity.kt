@@ -45,7 +45,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +60,6 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,10 +82,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun VideoLearningScreen() {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val player = remember { ExoPlayer.Builder(context).build() }
 
     var videoUrl by remember { mutableStateOf("") }
+    var currentMedia by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Abra um vídeo local ou cole um link direto.") }
     var cues by remember { mutableStateOf<List<CueLine>>(emptyList()) }
     var position by remember { mutableLongStateOf(0L) }
@@ -98,12 +96,11 @@ private fun VideoLearningScreen() {
     var showDictionary by remember { mutableStateOf(false) }
     var entry by remember { mutableStateOf<WordEntry?>(null) }
     var jsonInput by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
     var dictionaryError by remember { mutableStateOf("") }
 
     fun play(uri: Uri) {
         cues = emptyList()
+        currentMedia = (uri.lastPathSegment ?: "Vídeo").substringAfterLast("/").substringBeforeLast(".").take(120)
         position = 0L
         offsetMs = 0L
         player.setMediaItem(MediaItem.fromUri(uri))
@@ -165,7 +162,7 @@ private fun VideoLearningScreen() {
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("Anki Video Player", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text("Assista, selecione palavras e crie cartões.", color = Color(0xFF63727C))
+            Text("Favoritar agora, estudar depois. Criar cartões é opcional.", color = Color(0xFF63727C))
             Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -272,6 +269,11 @@ private fun VideoLearningScreen() {
                     }
                 }
             }
+            FavoriteSection(
+                activeCue = cue,
+                offsetMs = offsetMs,
+                currentMedia = currentMedia
+            )
         }
     }
 
@@ -284,28 +286,7 @@ private fun VideoLearningScreen() {
             ) {
                 Text(selectedWord, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Text(selectedSentence, style = MaterialTheme.typography.bodyMedium)
-                OutlinedTextField(
-                    value = apiKey, onValueChange = { apiKey = it },
-                    label = { Text("Chave Gemini API (apenas nesta sessão)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
-                )
-                Button(
-                    onClick = {
-                        busy = true
-                        dictionaryError = ""
-                        scope.launch {
-                            try {
-                                entry = DictionaryClient.fetch(apiKey, selectedWord, selectedSentence)
-                            } catch (error: Exception) {
-                                dictionaryError = error.message ?: "Falha ao consultar Gemini."
-                            } finally {
-                                busy = false
-                            }
-                        }
-                    },
-                    enabled = !busy && apiKey.isNotBlank()
-                ) { Text(if (busy) "Consultando..." else "Preencher com Gemini") }
+                Text("Modo manual: copie o prompt e cole a resposta JSON da IA que preferir.")
                 OutlinedButton(onClick = {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
@@ -349,7 +330,7 @@ private fun VideoLearningScreen() {
                         } catch (error: Exception) {
                             dictionaryError = "Não foi possível abrir o compartilhamento: " + error.message
                         }
-                    }) { Text("Enviar para AnkiDroid") }
+                    }) { Text("Compartilhar com AnkiDroid (opcional)") }
                 }
             }
         }

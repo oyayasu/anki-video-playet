@@ -1,39 +1,37 @@
 # Anki Video Player — Android
 
-An Android video player designed for studying languages through subtitles. The initial preview is built with **Kotlin**, **Jetpack Compose** and **Media3 ExoPlayer**.
+Player Android em Kotlin / Compose / Media3 para estudar idiomas com vídeos e legendas.
 
-## Preview v0.1
+## Versão 0.1.1
 
-- Play local video via Android's file picker (MP4, MKV, WebM and formats supported by the device/Media3).
-- Play **direct** HTTP(S) media URLs including HLS (`.m3u8`) and DASH (`.mpd`) when the host and device allow it. Does not extract videos from web pages, bypass DRM or log in to commercial streaming services.
-- Load external SRT, WebVTT and common ASS subtitle files, with word-by-word tap targets in a separate, synchronized subtitle panel.
-- Pause when a word is selected, repeat previous/current/next subtitle, change playback speed and subtitle offset.
-- Contextual English dictionary: copy a prompt and paste JSON, or supply your **own Gemini API key** to request results automatically. The key is kept in memory for the current session only, not stored or embedded.
-- Send a note with the word, original sentence, definitions, IPA and part-of-speech to AnkiDroid using Android's share mechanism. **Manual confirmation in AnkiDroid is required.**
+- Vídeos locais (formatos aceitos pelo Android/Media3) e URLs diretas de vídeo (MP4, HLS e DASH quando suportados pelo servidor e dispositivo).
+- Legendas externas SRT/VTT/ASS (ASS básico); palavras selecionáveis num painel sincronizado; velocidade, repetição e ajuste de sincronia.
+- **Principal:** favoritar uma legenda, com nome do filme/série, temporada e episódio, texto completo e timestamps originais + timestamps de reprodução.
+- Favoritos armazenados localmente, persistentes entre aberturas, com lista e botão remover. Não cria cartão ao favoritar.
+- **Exportar TXT UTF-8** para leitura humana, agrupado por obra/temporada/episódio.
+- **Exportar JSON** estruturado (versão 1) e importar backup JSON, ignorando duplicatas.
+- **Opcional:** tocar numa palavra para copiar o prompt de dicionário contextualizado, colar JSON gerado manualmente e compartilhar os dados como texto com AnkiDroid. A criação de cartão requer confirmação no AnkiDroid.
+- **Sem integração de API, sem chave de API, sem Gemini integrado.**
 
-### Install
+### Instalação
 
-Open [Releases](https://github.com/oyayasu/anki-video-playet/releases), download the latest `Anki-Video-Player-v*.apk` and install it on Android 8+.
+Baixe o arquivo APK da seção [Releases](https://github.com/oyayasu/anki-video-playet/releases). Necessário Android 8.0 ou superior.
 
-**Important:** preview builds are debug-signed independently by GitHub Actions. A later APK may not install over an older build; uninstalling the previous build may be necessary. There is no persisted learning library in this preview.
+**Atenção:** as builds de teste são assinadas com certificados de depuração efêmeros e podem exigir desinstalar uma versão anterior. Exporte seu JSON **antes de desinstalar** para não perder favoritas; depois importe o backup.
 
 ### Build
 
-Required: JDK 17, Android SDK API 36 and Gradle 8.11.1.
+JDK 17, Android SDK 36 e Gradle 8.11.1:
 
 ```sh
 gradle :app:testDebugUnitTest :app:assembleDebug
 ```
 
-GitHub Actions runs the unit tests and assembles the APK on every commit to `main`. Successful builds are published as prereleases.
+O [workflow Android APK](https://github.com/oyayasu/anki-video-playet/actions) cria o APK e publica a prévia na página Releases somente quando o job conclui com sucesso.
 
-### Scope and known limitations
+### Limitações
 
-- Local and direct media only; generic webpage URLs, YouTube extraction, Netflix and DRM services are **not** supported.
-- To tap individual words, load an **external** subtitle file. PlayerView may render embedded subtitle tracks, but those rendered captions are not interactive in this version.
-- ASS parsing supports ordinary `Dialogue:` events; unusual custom event layouts and rich ASS effects are not implemented.
-- This build shares plain-text cards with AnkiDroid. Automatic creation via AnkiDroid's database API, screenshots and audio clipping are not yet implemented.
-- HTTP URLs work when the media server supports compatible codec, range requests and access policies.
-- API use may incur provider quota limits; your Gemini key is never put into GitHub or packaged into the APK.
-
-The project intentionally focuses only on the agreed player, subtitle, contextual dictionary and Anki workflow.
+- Streaming online restrito a **URLs diretas de mídia** (sem DRM, autenticação ou extração de sites).
+- A interação por palavras e o favorito usam o arquivo de legendas externo. Legendas embutidas podem aparecer no vídeo, mas não são acessíveis no painel nesta versão.
+- A integração com AnkiDroid é via compartilhamento de texto, não criação automática no baralho; áudio e captura de imagem ainda não são adicionados ao cartão.
+- As informações favoritas permanecem apenas no dispositivo, com exportação/importação para transferência ao PC.

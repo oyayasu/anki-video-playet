@@ -1,11 +1,7 @@
 package com.oyayasu.ankivideoplayer
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 data class Meaning(val definition: String, val partOfSpeech: String, val ipa: String)
 data class WordEntry(val word: String, val subtitle: String, val meanings: List<Meaning>)
@@ -45,37 +41,4 @@ Schema: {"word":"term","subtitle":"original text","meanings":[{"definition":"...
         )
     }
 
-    suspend fun fetch(apiKey: String, word: String, sentence: String): WordEntry =
-        withContext(Dispatchers.IO) {
-            require(apiKey.isNotBlank()) { "Informe sua chave da API do Gemini." }
-            val connection = (URL(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-            ).openConnection() as HttpURLConnection)
-            try {
-                connection.requestMethod = "POST"
-                connection.connectTimeout = 15000
-                connection.readTimeout = 45000
-                connection.doOutput = true
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.setRequestProperty("x-goog-api-key", apiKey.trim())
-                val body = JSONObject().put(
-                    "contents", JSONArray().put(
-                        JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt(word, sentence))))
-                    )
-                ).put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
-                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val responseText = if (connection.responseCode in 200..299) {
-                    connection.inputStream.bufferedReader().use { it.readText() }
-                } else {
-                    val explanation = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-                    throw IllegalStateException("Gemini HTTP " + connection.responseCode + ": " + explanation.take(250))
-                }
-                val response = JSONObject(responseText)
-                val text = response.getJSONArray("candidates").getJSONObject(0)
-                    .getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                decode(text, word, sentence)
-            } finally {
-                connection.disconnect()
-            }
-        }
 }
