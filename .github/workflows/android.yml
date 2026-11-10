@@ -41,4 +41,4 @@ jobs:
           tag="v0.1.$GITHUB_RUN_NUMBER"
           file="Anki-Video-Player-$tag.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "$file"
-          gh release create "$tag" "$file" --title "Anki Video Player $tag (preview)" --prerelease --notes "First functional Android preview. Local files, direct media URLs, SRT/VTT/ASS word selection, manual/Gemini JSON dictionary, AnkiDroid share. Debug-signed build: future updates may require reinstalling."
+          gh release create "$tag" "$file" --title "Anki Video Player $tag (preview)" --prerelease --notes "v0.2: Stremio external player intents, embedded subtitle track selection, MX-style fullscreen playback, saved subtitles TXT/JSON and optional prompt-only cards. Debug-signed preview: export favorites before reinstalling."

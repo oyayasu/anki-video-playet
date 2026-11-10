@@ -166,28 +166,35 @@ class SavedLineStore(context: Context) {
     }
 }
 
-@Composable
-fun FavoriteSection(activeCue: CueLine?, offsetMs: Long, currentMedia: String) {
-    val context = LocalContext.current
-    val store = remember(context) { SavedLineStore(context) }
-    var favorites by remember { mutableStateOf(store.load()) }
-    var title by remember(currentMedia) { mutableStateOf(currentMedia) }
-    var season by remember(currentMedia) { mutableStateOf("") }
-    var episode by remember(currentMedia) { mutableStateOf("") }
-    var result by remember { mutableStateOf("") }
 
+/** UI only. Storage and title are hoisted so the fullscreen player can favorite too. */
+@Composable
+fun FavoriteSection(
+    activeCue: CueLine?,
+    title: String,
+    onTitle: (String) -> Unit,
+    season: String,
+    onSeason: (String) -> Unit,
+    episode: String,
+    onEpisode: (String) -> Unit,
+    favorites: List<SavedLine>,
+    saveFavorite: (CueLine) -> Unit,
+    removeFavorite: (String) -> Unit,
+    importFavorites: (String) -> Unit,
+    status: String
+) {
+    val context = LocalContext.current
+    var exportStatus by remember { mutableStateOf("") }
     val exportTxt = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/plain")
     ) { uri ->
         if (uri != null) {
             try {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    output.write(SavedLineFormat.asText(favorites).toByteArray(Charsets.UTF_8))
-                } ?: error("Arquivo não criado.")
-                result = "TXT exportado: " + favorites.size + " legendas."
-            } catch (error: Exception) {
-                result = "Erro ao exportar TXT: " + (error.message ?: "erro")
-            }
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(SavedLineFormat.asText(favorites).toByteArray(Charsets.UTF_8))
+                } ?: error("Arquivo não criado")
+                exportStatus = "TXT exportado: " + favorites.size + " legendas."
+            } catch (e: Exception) { exportStatus = "Falha ao exportar: " + e.message }
         }
     }
     val exportJson = rememberLauncherForActivityResult(
@@ -195,29 +202,20 @@ fun FavoriteSection(activeCue: CueLine?, offsetMs: Long, currentMedia: String) {
     ) { uri ->
         if (uri != null) {
             try {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    output.write(SavedLineFormat.encode(favorites).toByteArray(Charsets.UTF_8))
-                } ?: error("Arquivo não criado.")
-                result = "JSON exportado: " + favorites.size + " legendas."
-            } catch (error: Exception) {
-                result = "Erro ao exportar JSON: " + (error.message ?: "erro")
-            }
+                context.contentResolver.openOutputStream(uri)?.use {
+                    it.write(SavedLineFormat.encode(favorites).toByteArray(Charsets.UTF_8))
+                } ?: error("Arquivo não criado")
+                exportStatus = "JSON exportado: " + favorites.size + " legendas."
+            } catch (e: Exception) { exportStatus = "Falha ao exportar: " + e.message }
         }
     }
-    val importJson = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    val importJson = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
-                val text = context.contentResolver.openInputStream(uri)
-                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                    ?: error("Arquivo vazio.")
-                val (list, count) = store.restore(text)
-                favorites = list
-                result = "Importadas " + count + " legendas novas."
-            } catch (error: Exception) {
-                result = "Erro ao importar: " + (error.message ?: "JSON inválido")
-            }
+                val contents = context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: error("Arquivo vazio")
+                importFavorites(contents)
+            } catch (e: Exception) { exportStatus = "Falha ao importar: " + e.message }
         }
     }
 
@@ -225,116 +223,61 @@ fun FavoriteSection(activeCue: CueLine?, offsetMs: Long, currentMedia: String) {
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White)
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Favoritar para estudar depois", fontWeight = FontWeight.SemiBold)
-            Text(
-                "A legenda e seus timestamps ficam salvos no aparelho, sem criar cartão.",
-                style = MaterialTheme.typography.bodySmall, color = Color(0xFF63727C)
-            )
+            Text("Salve texto, obra e timestamps, sem precisar criar cartão.",
+                style = MaterialTheme.typography.bodySmall, color = Color(0xFF63727C))
             OutlinedTextField(
-                value = title, onValueChange = { title = it },
-                label = { Text("Filme ou série") }, modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                value = title, onValueChange = onTitle,
+                label = { Text("Filme ou série") }, modifier = Modifier.fillMaxWidth(), singleLine = true
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = season, onValueChange = { season = it },
-                    label = { Text("Temporada") }, modifier = Modifier.weight(1f),
-                    singleLine = true
+                    value = season, onValueChange = onSeason,
+                    label = { Text("Temporada") }, modifier = Modifier.weight(1f), singleLine = true
                 )
                 OutlinedTextField(
-                    value = episode, onValueChange = { episode = it },
-                    label = { Text("Episódio") }, modifier = Modifier.weight(1f),
-                    singleLine = true
+                    value = episode, onValueChange = onEpisode,
+                    label = { Text("Episódio") }, modifier = Modifier.weight(1f), singleLine = true
                 )
             }
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 enabled = activeCue != null,
-                onClick = {
-                    val cue = activeCue
-                    if (cue != null) {
-                        try {
-                            val count = favorites.size
-                            favorites = store.add(SavedLine(
-                                title = title.trim().ifBlank { "Sem título" },
-                                season = season.trim(), episode = episode.trim(),
-                                text = cue.text,
-                                startMs = (cue.startMs - offsetMs).coerceAtLeast(0),
-                                endMs = (cue.endMs - offsetMs).coerceAtLeast(0),
-                                subtitleStartMs = cue.startMs,
-                                subtitleEndMs = cue.endMs
-                            ))
-                            result = if (favorites.size > count) "Legenda adicionada às favoritas."
-                                else "Essa legenda já está salva."
-                        } catch (error: Exception) {
-                            result = "Falha ao salvar: " + (error.message ?: "erro")
-                        }
-                    }
-                }
+                onClick = { activeCue?.let(saveFavorite) }
             ) { Text("★  Favoritar legenda atual") }
-            Text(
-                "Minhas favoritas (" + favorites.size + ")",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Text("Minhas favoritas (" + favorites.size + ")",
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { exportTxt.launch("legendas-favoritas.txt") },
-                    enabled = favorites.isNotEmpty()
-                ) { Text("Exportar TXT") }
-                OutlinedButton(
-                    onClick = { exportJson.launch("legendas-favoritas.json") },
-                    enabled = favorites.isNotEmpty()
-                ) { Text("Exportar JSON") }
+                OutlinedButton(onClick = { exportTxt.launch("legendas-favoritas.txt") },
+                    enabled = favorites.isNotEmpty()) { Text("Exportar TXT") }
+                OutlinedButton(onClick = { exportJson.launch("legendas-favoritas.json") },
+                    enabled = favorites.isNotEmpty()) { Text("Exportar JSON") }
             }
             TextButton(onClick = { importJson.launch(arrayOf("application/json", "*/*")) }) {
                 Text("Importar backup JSON")
             }
-            if (result.isNotBlank()) Text(
-                result, color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.bodySmall
-            )
-            if (favorites.isEmpty()) Text(
-                "Nenhuma legenda salva ainda.", style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF63727C)
-            )
+            if (status.isNotBlank()) Text(status, color = MaterialTheme.colorScheme.primary)
+            if (exportStatus.isNotBlank()) Text(exportStatus, color = MaterialTheme.colorScheme.primary)
+            if (favorites.isEmpty()) Text("Nenhuma legenda salva ainda.", color = Color(0xFF63727C))
             favorites.asReversed().take(30).forEach { line ->
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F7))
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Text(
-                            line.title +
-                                (if (line.season.isBlank()) "" else " · T" + line.season) +
-                                (if (line.episode.isBlank()) "" else " · E" + line.episode),
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(SavedLineFormat.time(line.startMs) + " → " + SavedLineFormat.time(line.endMs),
-                            color = MaterialTheme.colorScheme.primary)
+                Card(shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F7))) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(line.title +
+                            (if (line.season.isBlank()) "" else " · T" + line.season) +
+                            (if (line.episode.isBlank()) "" else " · E" + line.episode),
+                            fontWeight = FontWeight.SemiBold)
+                        Text(SavedLineFormat.time(line.startMs) + " → " +
+                            SavedLineFormat.time(line.endMs), color = MaterialTheme.colorScheme.primary)
                         Text(line.text)
-                        TextButton(onClick = {
-                            try {
-                                favorites = store.remove(line.id)
-                                result = "Legenda removida."
-                            } catch (error: Exception) {
-                                result = "Erro ao remover: " + error.message
-                            }
-                        }) { Text("Remover") }
+                        TextButton(onClick = { removeFavorite(line.id) }) { Text("Remover") }
                     }
                 }
             }
-            if (favorites.size > 30) Text(
-                "Exibindo as 30 mais recentes; as exportações incluem todas.",
-                style = MaterialTheme.typography.bodySmall
-            )
+            if (favorites.size > 30) Text("Exibindo as 30 mais recentes; o export inclui todas.",
+                style = MaterialTheme.typography.bodySmall)
         }
     }
 }

@@ -2,7 +2,12 @@ package com.oyayasu.ankivideoplayer
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
+ import android.os.Bundle
+import androidx.media3.common.C
+import androidx.media3.common.Tracks
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.text.CueGroup
+import androidx.media3.common.util.UnstableApi
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,7 +15,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -19,7 +23,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -34,7 +37,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
@@ -52,18 +54,36 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private var incoming by mutableStateOf<Intent?>(null)
+    private var externalPlayer: ExoPlayer? = null
+
+    fun reportPlayback(player: ExoPlayer) { externalPlayer = player }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incoming = intent.takeIf { it.action == Intent.ACTION_VIEW }
+    }
+
+    override fun finish() {
+        externalPlayer?.let { player ->
+            setResult(RESULT_OK, Intent().apply {
+                putExtra("position", player.currentPosition.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+                putExtra("duration", player.duration.coerceIn(0, Int.MAX_VALUE.toLong()).toInt())
+            })
+        }
+        super.finish()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incoming = intent.takeIf { it.action == Intent.ACTION_VIEW }
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
@@ -72,21 +92,37 @@ class MainActivity : ComponentActivity() {
                     background = Color(0xFFF5F7FA)
                 )
             ) {
-                VideoLearningScreen()
+                VideoLearningScreen(incoming)
             }
         }
     }
 }
 
+private data class SubtitleChoice(
+    val group: Tracks.Group, val index: Int, val label: String, val selected: Boolean
+)
+
+@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun VideoLearningScreen() {
+private fun VideoLearningScreen(incoming: Intent?) {
     val context = LocalContext.current
+    val activity = context as MainActivity
     val player = remember { ExoPlayer.Builder(context).build() }
 
     var videoUrl by remember { mutableStateOf("") }
     var currentMedia by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Abra um vídeo local ou cole um link direto.") }
+    var mediaTitle by remember { mutableStateOf("") }
+    var season by remember { mutableStateOf("") }
+    var episode by remember { mutableStateOf("") }
+    var fullscreen by remember { mutableStateOf(false) }
+    var embeddedCue by remember { mutableStateOf<CueLine?>(null) }
+    var useExternalCues by remember { mutableStateOf(false) }
+    var choices by remember { mutableStateOf<List<SubtitleChoice>>(emptyList()) }
+    val favoritesStore = remember(context) { SavedLineStore(context) }
+    var favorites by remember { mutableStateOf(favoritesStore.load()) }
+    var favoriteStatus by remember { mutableStateOf("") }
     var cues by remember { mutableStateOf<List<CueLine>>(emptyList()) }
     var position by remember { mutableLongStateOf(0L) }
     var offsetMs by remember { mutableLongStateOf(0L) }
@@ -98,13 +134,51 @@ private fun VideoLearningScreen() {
     var jsonInput by remember { mutableStateOf("") }
     var dictionaryError by remember { mutableStateOf("") }
 
-    fun play(uri: Uri) {
+    fun saveFavorite(line: CueLine) {
+        try {
+            val before = favorites.size
+            favorites = favoritesStore.add(SavedLine(
+                title = mediaTitle.trim().ifBlank { "Sem título" },
+                season = season.trim(),
+                episode = episode.trim(),
+                text = line.text,
+                startMs = (line.startMs - if (useExternalCues) offsetMs else 0L).coerceAtLeast(0),
+                endMs = (line.endMs - if (useExternalCues) offsetMs else 0L).coerceAtLeast(0),
+                subtitleStartMs = line.startMs,
+                subtitleEndMs = line.endMs
+            ))
+            favoriteStatus = if (favorites.size > before) "Legenda salva."
+                else "Essa legenda já está nas favoritas."
+        } catch (e: Exception) { favoriteStatus = "Erro ao salvar: " + e.message }
+    }
+
+    fun selectWord(token: String, line: CueLine) {
+        val normalized = token.trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
+        if (normalized.isNotBlank()) {
+            selectedWord = normalized
+            selectedSentence = line.text
+            entry = null
+            jsonInput = ""
+            dictionaryError = ""
+            player.pause()
+            showDictionary = true
+        }
+    }
+
+    fun play(uri: Uri, titleHint: String? = null, startMs: Long = 0, mimeHint: String? = null) {
         cues = emptyList()
+        useExternalCues = false
+        embeddedCue = null
+        choices = emptyList()
         currentMedia = (uri.lastPathSegment ?: "Vídeo").substringAfterLast("/").substringBeforeLast(".").take(120)
+        mediaTitle = titleHint?.takeIf { it.isNotBlank() } ?: currentMedia
+        season = ""
+        episode = ""
         position = 0L
         offsetMs = 0L
-        player.setMediaItem(MediaItem.fromUri(uri))
+        player.setMediaItem(ExternalPlayback.asMediaItem(uri, mimeHint))
         player.prepare()
+        if (startMs > 0) player.seekTo(startMs)
         player.play()
         status = "Reproduzindo: " + (uri.lastPathSegment ?: uri.toString()).take(90)
     }
@@ -127,6 +201,7 @@ private fun VideoLearningScreen() {
             try {
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
                 cues = SubtitleParser.parse(text)
+                useExternalCues = cues.isNotEmpty()
                 status = if (cues.isEmpty()) "Nenhuma legenda reconhecida." else "Legendas carregadas: " + cues.size
             } catch (error: Exception) {
                 status = "Erro ao abrir legenda: " + (error.message ?: "desconhecido")
@@ -134,8 +209,49 @@ private fun VideoLearningScreen() {
         }
     }
 
+    LaunchedEffect(incoming) {
+        ExternalPlayback.parse(incoming)?.let { stream ->
+            videoUrl = stream.uri.toString()
+            play(stream.uri, stream.title, stream.positionMs, stream.mimeHint)
+            fullscreen = true
+        }
+    }
     DisposableEffect(player) {
+        activity.reportPlayback(player)
         val listener = object : Player.Listener {
+            override fun onCues(cueGroup: CueGroup) {
+                val text = cueGroup.cues.mapNotNull { it.text?.toString() }
+                    .filter { it.isNotBlank() }.joinToString(" ").trim()
+                if (text.isEmpty()) embeddedCue = null
+                else {
+                    val now = player.currentPosition.coerceAtLeast(0)
+                    val old = embeddedCue
+                    embeddedCue = if (old?.text == text) old else CueLine(now, now + 2500, text)
+                }
+            }
+            override fun onTracksChanged(tracks: Tracks) {
+                choices = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+                    .flatMap { group ->
+                        (0 until group.length).filter { group.isTrackSupported(it) }.map { index ->
+                            val format = group.getTrackFormat(index)
+                            SubtitleChoice(
+                                group, index,
+                                format.label?.takeIf { it.isNotBlank() }
+                                    ?: format.language?.takeIf { it.isNotBlank() }
+                                    ?: ("Faixa " + (index + 1)),
+                                group.isTrackSelected(index)
+                            )
+                        }
+                    }
+                if (choices.isNotEmpty() && choices.none { it.selected }) {
+                    val first = choices.first()
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .addOverride(TrackSelectionOverride(first.group.mediaTrackGroup, listOf(first.index)))
+                        .build()
+                }
+            }
             override fun onPlayerError(error: PlaybackException) {
                 status = "Falha de reprodução: " + (error.message ?: "formato ou endereço não suportado")
             }
@@ -153,7 +269,27 @@ private fun VideoLearningScreen() {
         }
     }
 
-    val cue = cues.lastOrNull { position + offsetMs >= it.startMs && position + offsetMs < it.endMs }
+    val cue = if (useExternalCues) {
+        cues.lastOrNull { position + offsetMs >= it.startMs && position + offsetMs < it.endMs }
+    } else embeddedCue
+    fun chooseTextTrack(choice: SubtitleChoice) {
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+            .addOverride(TrackSelectionOverride(choice.group.mediaTrackGroup, listOf(choice.index)))
+            .build()
+        useExternalCues = false
+    }
+
+    if (fullscreen) {
+        PlaybackOverlay(
+            player = player, title = mediaTitle, position = position,
+            caption = cue, fullscreen = true, modifier = Modifier.fillMaxSize(),
+            onFullscreen = { fullscreen = it },
+            onFavorite = { saveFavorite(it) },
+            onWord = { token, line -> selectWord(token, line) }
+        )
+    } else {
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { scaffoldPadding ->
         Column(
@@ -188,25 +324,38 @@ private fun VideoLearningScreen() {
                 }
             }
 
-            Surface(shape = RoundedCornerShape(18.dp), shadowElevation = 2.dp, color = Color.Black) {
-                AndroidView(
-                    factory = { viewContext ->
-                        PlayerView(viewContext).apply {
-                            this.player = player
-                            useController = true
-                            keepScreenOn = true
-                        }
-                    },
-                    update = { it.player = player },
-                    modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f)
-                )
-            }
+            PlaybackOverlay(
+                player = player, title = mediaTitle, position = position,
+                caption = cue, fullscreen = false,
+                modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                onFullscreen = { fullscreen = it },
+                onFavorite = { saveFavorite(it) },
+                onWord = { token, line -> selectWord(token, line) }
+            )
             Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Legenda interativa", fontWeight = FontWeight.SemiBold)
+                    if (choices.isNotEmpty()) {
+                        Text("Legendas embutidas (selecione um idioma):",
+                            style = MaterialTheme.typography.bodySmall)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            choices.forEach { option ->
+                                OutlinedButton(onClick = { chooseTextTrack(option) }) {
+                                    Text((if (option.selected && !useExternalCues) "✓ " else "") + option.label)
+                                }
+                            }
+                        }
+                    }
+                    if (cues.isNotEmpty() && choices.isNotEmpty()) {
+                        Row {
+                            TextButton(onClick = { useExternalCues = false }) { Text("Interna") }
+                            TextButton(onClick = { useExternalCues = true }) { Text("SRT externo") }
+                        }
+                    }
                     if (cue == null) {
                         Text(
-                            if (cues.isEmpty()) "Carregue um arquivo SRT, VTT ou ASS para tocar nas palavras."
+                            if (choices.isEmpty() && cues.isEmpty())
+                                "Nenhuma faixa de texto reconhecida. Abra SRT externo se necessário."
                             else "Nenhuma fala neste momento.",
                             color = Color(0xFF6E7A83)
                         )
@@ -220,16 +369,7 @@ private fun VideoLearningScreen() {
                                     modifier = Modifier
                                         .background(Color(0xFFE9F4F6), RoundedCornerShape(8.dp))
                                         .clickable {
-                                            val normalized = token.trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
-                                            if (normalized.isNotBlank()) {
-                                                selectedWord = normalized
-                                                selectedSentence = cue.text
-                                                entry = null
-                                                jsonInput = ""
-                                                dictionaryError = ""
-                                                player.pause()
-                                                showDictionary = true
-                                            }
+                                            selectWord(token, cue)
                                         }.padding(horizontal = 6.dp, vertical = 4.dp)
                                 )
                             }
@@ -270,11 +410,26 @@ private fun VideoLearningScreen() {
                 }
             }
             FavoriteSection(
-                activeCue = cue,
-                offsetMs = offsetMs,
-                currentMedia = currentMedia
+                activeCue = cue, title = mediaTitle, onTitle = { mediaTitle = it },
+                season = season, onSeason = { season = it },
+                episode = episode, onEpisode = { episode = it },
+                favorites = favorites, saveFavorite = { saveFavorite(it) },
+                removeFavorite = { id ->
+                    try { favorites = favoritesStore.remove(id); favoriteStatus = "Legenda removida." }
+                    catch (e: Exception) { favoriteStatus = "Erro ao remover: " + e.message }
+                },
+                importFavorites = { json ->
+                    try {
+                        val (list, count) = favoritesStore.restore(json)
+                        favorites = list
+                        favoriteStatus = count.toString() + " novas legendas importadas."
+                    } catch (e: Exception) { favoriteStatus = "Erro ao importar: " + e.message }
+                },
+                status = favoriteStatus
             )
         }
+    }
+
     }
 
     if (showDictionary) {

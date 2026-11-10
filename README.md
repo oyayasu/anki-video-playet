@@ -1,37 +1,31 @@
 # Anki Video Player — Android
 
-Player Android em Kotlin / Compose / Media3 para estudar idiomas com vídeos e legendas.
+Player em Kotlin, Jetpack Compose e Media3.
 
-## Versão 0.1.1
+## Preview v0.2
 
-- Vídeos locais (formatos aceitos pelo Android/Media3) e URLs diretas de vídeo (MP4, HLS e DASH quando suportados pelo servidor e dispositivo).
-- Legendas externas SRT/VTT/ASS (ASS básico); palavras selecionáveis num painel sincronizado; velocidade, repetição e ajuste de sincronia.
-- **Principal:** favoritar uma legenda, com nome do filme/série, temporada e episódio, texto completo e timestamps originais + timestamps de reprodução.
-- Favoritos armazenados localmente, persistentes entre aberturas, com lista e botão remover. Não cria cartão ao favoritar.
-- **Exportar TXT UTF-8** para leitura humana, agrupado por obra/temporada/episódio.
-- **Exportar JSON** estruturado (versão 1) e importar backup JSON, ignorando duplicatas.
-- **Opcional:** tocar numa palavra para copiar o prompt de dicionário contextualizado, colar JSON gerado manualmente e compartilhar os dados como texto com AnkiDroid. A criação de cartão requer confirmação no AnkiDroid.
-- **Sem integração de API, sem chave de API, sem Gemini integrado.**
+- Reprodução de vídeos locais e URLs diretas, HLS e DASH quando suportados pelo aparelho.
+- Compatibilidade com o menu **player externo** do Stremio via `ACTION_VIEW` Android (`http`, `https`, `content`, `file`; MIME `video/*`). Aceita posição de início quando fornecida e retorna a posição quando fechado.
+- **Faixas de legendas embutidas:** detecta e permite escolher idiomas disponíveis (MKV/MP4/streams compatíveis), lê texto com `onCues` e exibe palavras selecionáveis, sem precisar importar um SRT separado.
+- **Legendas externas opcionais:** SRT, VTT e ASS básico. Quando há ambas, você pode escolher a fonte.
+- Interface inspirada no MX Player: controles sobre o vídeo, tela cheia horizontal, barra de progresso, avanço/retrocesso de 10s (inclusive duplo toque), gesto horizontal para buscar e gestos verticais para volume/brilho, zoom e velocidade.
+- Favoritas salvas localmente com obra, temporada/episódio, fala e timestamps; exportação TXT e JSON; importação de backup.
+- Criação de cartão **opcional** por prompt copiado + JSON colado, com compartilhamento de texto para AnkiDroid. **Sem API de IA**.
 
-### Instalação
+### Limitações
 
-Baixe o arquivo APK da seção [Releases](https://github.com/oyayasu/anki-video-playet/releases). Necessário Android 8.0 ou superior.
+- O Stremio precisa enviar uma URL de mídia ou URI de conteúdo compatível. Não contornamos DRM nem reproduzimos sites como páginas web.
+- Faixas de legendas em formato **imagem** (PGS/VobSub) não são texto selecionável. Faixas não compatíveis com Media3 também não estarão disponíveis.
+- O Media3 informa o texto das legendas embutidas, mas não fornece o instante exato de término de cada fala via `onCues`. Neste preview o intervalo salvo para uma fala embutida é uma estimativa inicial de 2,5 segundos. SRT externo conserva seus tempos originais.
+- Metadados de título, temporada e episódio podem não vir do Stremio. Edite-os na seção de favoritas.
+- APK assinado para depuração no GitHub Actions. **Exporte seu JSON antes de desinstalar** uma build, pois os dados locais serão apagados.
 
-**Atenção:** as builds de teste são assinadas com certificados de depuração efêmeros e podem exigir desinstalar uma versão anterior. Exporte seu JSON **antes de desinstalar** para não perder favoritas; depois importe o backup.
+### Instalar e compilar
 
-### Build
+Instale pela página [Releases](https://github.com/oyayasu/anki-video-playet/releases). Em Stremio, ative o uso de um player externo e escolha *Anki Video Player*.
 
-JDK 17, Android SDK 36 e Gradle 8.11.1:
+Requer Android 8+, JDK 17 e Android SDK 36 para compilar:
 
 ```sh
 gradle :app:testDebugUnitTest :app:assembleDebug
 ```
-
-O [workflow Android APK](https://github.com/oyayasu/anki-video-playet/actions) cria o APK e publica a prévia na página Releases somente quando o job conclui com sucesso.
-
-### Limitações
-
-- Streaming online restrito a **URLs diretas de mídia** (sem DRM, autenticação ou extração de sites).
-- A interação por palavras e o favorito usam o arquivo de legendas externo. Legendas embutidas podem aparecer no vídeo, mas não são acessíveis no painel nesta versão.
-- A integração com AnkiDroid é via compartilhamento de texto, não criação automática no baralho; áudio e captura de imagem ainda não são adicionados ao cartão.
-- As informações favoritas permanecem apenas no dispositivo, com exportação/importação para transferência ao PC.
